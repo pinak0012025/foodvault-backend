@@ -1,0 +1,5 @@
+uploads/products/*
+!uploads/products/.gitkeep
+*.py[cod]
+__pycache__/
+.env
