@@ -7,7 +7,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from backend.models import (
+from models import (
     AuditLog,
     AutoSellLog,
     CurrencyRate,
@@ -33,7 +33,7 @@ from backend.models import (
     Wallet,
     WalletTransaction,
 )
-from backend.services import notify_user, to_serializable
+from services import notify_user, to_serializable
 
 
 def now_utc() -> datetime:
