@@ -17,9 +17,9 @@ load_dotenv(BASE_DIR / ".env")
 load_dotenv(BASE_DIR.parent / ".env.local")
 load_dotenv(BASE_DIR.parent / ".env", override=False)
 
-from backend.database import get_db
-from backend.models import AdminSession, AdminUser, UserProfile
-from backend.services import create_or_update_user_profile
+from database import get_db
+from models import AdminSession, AdminUser, UserProfile
+from services import create_or_update_user_profile
 
 security = HTTPBearer(auto_error=False)
 
