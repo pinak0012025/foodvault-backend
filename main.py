@@ -22,7 +22,7 @@ if str(BASE_DIR.parent) not in sys.path:
 
 import auth, services, database, models
 import httpx
-import get_db, init_db
+from database import get_db, init_db
 from models import AdminSession, AdminUser, CartItem, Order, Payment, Product, ReserveVault, ReserveItem, DeliverySchedule, Inventory, UserProfile
 from phase2_routes import router as phase2_router
 from phase2_services import create_referral_commission_for_order
