@@ -3,7 +3,7 @@ from typing import Any, Dict
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from import auth
+import auth
 from database import get_db
 from models import MembershipPlan, ReferralCommission, ReferralUsage, UserMembership, UserProfile
 from phase2_schemas import (
