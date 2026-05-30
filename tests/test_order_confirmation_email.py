@@ -1,7 +1,7 @@
 from decimal import Decimal
 from types import SimpleNamespace
 
-from backend.services import build_order_confirmation_email
+from services import build_order_confirmation_email
 
 
 def test_build_order_confirmation_email_includes_order_details():
