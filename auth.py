@@ -75,18 +75,15 @@ def decode_supabase_token(token: str) -> dict:
 
 
 def get_supabase_claims(token: str) -> dict:
-    try:
-        print("[AUTH] Trying local JWT validation", flush=True)
-        return decode_supabase_token(token)
-    except HTTPException as decode_error:
-        print(f"[AUTH] JWT validation failed: {decode_error.detail}", flush=True)
+    print("[AUTH] Using Supabase verification only", flush=True)
 
-        try:
-            print("[AUTH] Trying Supabase user endpoint fallback", flush=True)
-            return fetch_supabase_user_claims(token, decode_error)
-        except Exception as fallback_error:
-            print(f"[AUTH] Fallback failed: {fallback_error}", flush=True)
-            raise
+    return fetch_supabase_user_claims(
+        token,
+        HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Supabase verification failed",
+        ),
+    )
 
 
 def fetch_supabase_user_claims(token: str, fallback_error: HTTPException) -> dict:
