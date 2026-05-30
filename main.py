@@ -22,12 +22,12 @@ if str(BASE_DIR.parent) not in sys.path:
 
 import auth, services, database, models
 import httpx
-from backend.database import get_db, init_db
-from backend.models import AdminSession, AdminUser, CartItem, Order, Payment, Product, ReserveVault, ReserveItem, DeliverySchedule, Inventory, UserProfile
-from backend.phase2_routes import router as phase2_router
-from backend.phase2_services import create_referral_commission_for_order
-from backend.routes.payment_routes import router as payment_router
-from backend.webhooks.stripe_webhooks import router as stripe_webhook_router
+import get_db, init_db
+from models import AdminSession, AdminUser, CartItem, Order, Payment, Product, ReserveVault, ReserveItem, DeliverySchedule, Inventory, UserProfile
+from phase2_routes import router as phase2_router
+from phase2_services import create_referral_commission_for_order
+from routes.payment_routes import router as payment_router
+from webhooks.stripe_webhooks import router as stripe_webhook_router
 
 load_dotenv(BASE_DIR / ".env")
 load_dotenv(BASE_DIR.parent / ".env.local")
