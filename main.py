@@ -20,7 +20,7 @@ BASE_DIR = Path(__file__).resolve().parent
 if str(BASE_DIR.parent) not in sys.path:
     sys.path.insert(0, str(BASE_DIR.parent))
 
-from backend import auth, services, database, models
+import auth, services, database, models
 import httpx
 from backend.database import get_db, init_db
 from backend.models import AdminSession, AdminUser, CartItem, Order, Payment, Product, ReserveVault, ReserveItem, DeliverySchedule, Inventory, UserProfile
