@@ -4,12 +4,12 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, Request, Response, status
 from sqlalchemy.orm import Session
 
-from backend import services
-from backend.config import settings
-from backend.database import get_db
-from backend.models import AuditLog, Payment, UserProfile
-from backend.models_stripe import FinancialLedger, Invoice, PaymentTransaction, StripeCustomer, StripeWebhookEvent, Subscription, SubscriptionEvent
-from backend.stripe.webhook_service import WebhookService
+import services
+from config import settings
+from database import get_db
+from models import AuditLog, Payment, UserProfile
+from models_stripe import FinancialLedger, Invoice, PaymentTransaction, StripeCustomer, StripeWebhookEvent, Subscription, SubscriptionEvent
+from stripe.webhook_service import WebhookService
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
