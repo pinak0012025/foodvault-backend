@@ -213,8 +213,8 @@ def seed_default_products() -> None:
 
 
 def init_db() -> None:
-    import backend.models  # noqa: F401
-    import backend.models_stripe  # noqa: F401
+    import models  # noqa: F401
+    import models_stripe  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
     ensure_product_columns()
