@@ -3,10 +3,10 @@ from typing import Any, Dict
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from backend import auth
-from backend.database import get_db
-from backend.models import MembershipPlan, ReferralCommission, ReferralUsage, UserMembership, UserProfile
-from backend.phase2_schemas import (
+from import auth
+from database import get_db
+from models import MembershipPlan, ReferralCommission, ReferralUsage, UserMembership, UserProfile
+from phase2_schemas import (
     AuditLogOut,
     CurrencyRateUpsert,
     JobRunResponse,
@@ -31,7 +31,7 @@ from backend.phase2_schemas import (
     WalletTransactionOut,
     WalletTransactionRequest,
 )
-from backend.phase2_services import (
+from phase2_services import (
     activate_membership,
     apply_wallet_transaction,
     approve_referral_commission,
