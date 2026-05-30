@@ -4,12 +4,12 @@ from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from backend import auth
-from backend.database import get_db
-from backend.models import MembershipPlan, MembershipTransaction, Product, UserMembership, UserProfile
-from backend.models_stripe import StripeCustomer, Subscription
-from backend.phase2_services import create_membership_benefits, ensure_seed_membership_plans
-from backend.stripe.payment_service import PaymentService
+import auth
+from database import get_db
+from models import MembershipPlan, MembershipTransaction, Product, UserMembership, UserProfile
+from models_stripe import StripeCustomer, Subscription
+from phase2_services import create_membership_benefits, ensure_seed_membership_plans
+from stripe.payment_service import PaymentService
 
 router = APIRouter()
 
