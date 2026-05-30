@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from backend.routes.payment_routes import calculate_checkout_totals
+from routes.payment_routes import calculate_checkout_totals
 
 
 def test_calculate_checkout_totals_uses_planner_lock_amount_for_reserves():
