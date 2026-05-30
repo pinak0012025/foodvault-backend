@@ -13,7 +13,7 @@ from fastapi import UploadFile
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from backend.models import (
+from models import (
     AdminUser,
     Cart,
     CartItem,
@@ -30,7 +30,7 @@ from backend.models import (
     ReserveVault,
     UserProfile,
 )
-from backend.models_stripe import PaymentTransaction
+from models_stripe import PaymentTransaction
 
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 IMAGE_UPLOAD_FORMAT = "png"
