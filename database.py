@@ -65,7 +65,7 @@ def ensure_reserve_item_columns() -> None:
 
 
 def seed_default_products() -> None:
-    from backend.models import Inventory, Product
+    from models import Inventory, Product
 
     db = SessionLocal()
     try:
