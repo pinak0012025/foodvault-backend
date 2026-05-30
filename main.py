@@ -20,19 +20,14 @@ BASE_DIR = Path(__file__).resolve().parent
 if str(BASE_DIR.parent) not in sys.path:
     sys.path.insert(0, str(BASE_DIR.parent))
 
-#from backend import auth, services, database, models
-import auth
-import services
-import database
-import models
+from backend import auth, services, database, models
 import httpx
-#from backend.database import get_db, init_db
-from database import get_db, init_db
-from models import AdminSession, AdminUser, CartItem, Order, Payment, Product, ReserveVault, ReserveItem, DeliverySchedule, Inventory, UserProfile
-from phase2_routes import router as phase2_router
-from phase2_services import create_referral_commission_for_order
-from routes.payment_routes import router as payment_router
-from webhooks.stripe_webhooks import router as stripe_webhook_router
+from backend.database import get_db, init_db
+from backend.models import AdminSession, AdminUser, CartItem, Order, Payment, Product, ReserveVault, ReserveItem, DeliverySchedule, Inventory, UserProfile
+from backend.phase2_routes import router as phase2_router
+from backend.phase2_services import create_referral_commission_for_order
+from backend.routes.payment_routes import router as payment_router
+from backend.webhooks.stripe_webhooks import router as stripe_webhook_router
 
 load_dotenv(BASE_DIR / ".env")
 load_dotenv(BASE_DIR.parent / ".env.local")
@@ -194,16 +189,17 @@ def set_session_cookie(res: JSONResponse, key: str, value: str, max_age: int) ->
     """Set session cookie with secure and stable rules for auth.
 
     - `path='/'` ensures the cookie is available across the site.
-    - `sameSite='lax'` keeps auth cookies available for same-site navigation.
+    - `sameSite='none'` is required for cross-site requests from Vercel to Render.
     - `secure` is enabled only in production.
     """
     secure = use_secure_cookies()
+    same_site = "none" if secure else "lax"
     res.set_cookie(
         key=key,
         value=value,
         httponly=True,
         secure=secure,
-        samesite="lax",
+        samesite=same_site,
         max_age=max_age,
         path="/",
     )
