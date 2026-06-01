@@ -20,6 +20,9 @@ Base = declarative_base()
 def ensure_product_columns() -> None:
     with engine.begin() as conn:
         current_columns = {column["name"] for column in inspect(conn).get_columns("products")}
+        if "vendor_id" not in current_columns:
+            conn.execute(text("ALTER TABLE products ADD COLUMN vendor_id INTEGER"))
+            current_columns.add("vendor_id")
         if "metadata" not in current_columns:
             conn.execute(text("ALTER TABLE products ADD COLUMN metadata JSON DEFAULT '{}'"))
             current_columns = {column["name"] for column in inspect(conn).get_columns("products")}
@@ -41,6 +44,10 @@ def ensure_product_columns() -> None:
             if column_name not in current_columns:
                 conn.execute(text(f"ALTER TABLE products ADD COLUMN {column_name} {definition}"))
                 current_columns.add(column_name)
+
+
+def ensure_procurement_tables() -> None:
+    Base.metadata.create_all(bind=engine)
 
 
 def ensure_user_profile_columns() -> None:
@@ -220,6 +227,7 @@ def init_db() -> None:
     ensure_product_columns()
     ensure_user_profile_columns()
     ensure_reserve_item_columns()
+    ensure_procurement_tables()
     seed_default_products()
 
 
