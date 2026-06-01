@@ -22,12 +22,21 @@ if str(BASE_DIR.parent) not in sys.path:
 
 import auth, services, database, models
 import httpx
+<<<<<<< HEAD
 from database import get_db, init_db
 from models import AdminSession, AdminUser, CartItem, Order, Payment, Product, ReserveVault, ReserveItem, DeliverySchedule, Inventory, UserProfile
 from phase2_routes import router as phase2_router
 from phase2_services import create_referral_commission_for_order
 from routes.payment_routes import router as payment_router
 from webhooks.stripe_webhooks import router as stripe_webhook_router
+=======
+from backend.database import get_db, init_db
+from backend.models import AdminSession, AdminUser, CartItem, Order, Payment, Product, ReserveVault, ReserveItem, DeliverySchedule, Inventory, UserProfile, Vendor, PurchaseOrder, PurchaseOrderItem, InventoryReceipt, InventoryReceiptItem
+from backend.phase2_routes import router as phase2_router
+from backend.phase2_services import create_referral_commission_for_order
+from backend.routes.payment_routes import router as payment_router
+from backend.webhooks.stripe_webhooks import router as stripe_webhook_router
+>>>>>>> 7f433c6 (Added vendor management, purchase orders, inventory receipts and procurement workflow)
 
 load_dotenv(BASE_DIR / ".env")
 load_dotenv(BASE_DIR.parent / ".env.local")
@@ -666,6 +675,52 @@ class OrderStatusPayload(BaseModel):
     delivery_date: Optional[datetime] = None
 
 
+class VendorPayload(BaseModel):
+    name: str
+    code: Optional[str] = None
+    contact_name: Optional[str] = None
+    contact_email: Optional[str] = None
+    contact_phone: Optional[str] = None
+    status: Optional[str] = None
+
+
+class PurchaseOrderItemPayload(BaseModel):
+    product_id: int
+    quantity: int = Field(default=1, ge=1)
+    unit_cost: Decimal = Field(default=0, gt=0)
+
+
+class PurchaseOrderCreatePayload(BaseModel):
+    vendor_id: int
+    expected_delivery_date: Optional[datetime] = None
+    currency: Optional[str] = "USD"
+    items: List[PurchaseOrderItemPayload]
+
+
+class PurchaseOrderUpdatePayload(BaseModel):
+    status: Optional[str] = None
+    expected_delivery_date: Optional[datetime] = None
+
+
+class PurchaseOrderReceivePayload(BaseModel):
+    received_by: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class InventoryReceiptItemPayload(BaseModel):
+    purchase_order_item_id: int
+    quantity_received: int
+    quantity_rejected: int = 0
+    damage_notes: Optional[str] = None
+
+
+class InventoryReceiptCreatePayload(BaseModel):
+    purchase_order_id: int
+    items: List[InventoryReceiptItemPayload]
+    received_by: Optional[str] = None
+    notes: Optional[str] = None
+
+
 @app.on_event("startup")
 def startup_event() -> None:
     init_db()
@@ -728,10 +783,16 @@ async def api_admin_create_product(
     lock_duration_days: int = Form(100),
     delivery_options: str = Form("standard"),
     inventory_quantity: int = Form(0),
+    vendor_id: Optional[int] = Form(None),
     images: Optional[Union[UploadFile, List[UploadFile]]] = File(None),
     db: Session = Depends(get_db),
     current_user=Depends(auth.require_admin_user),
 ) -> Dict[str, object]:
+    if vendor_id is not None:
+        vendor = db.query(Vendor).filter(Vendor.id == vendor_id).one_or_none()
+        if not vendor:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vendor not found")
+    
     if isinstance(images, UploadFile):
         saved_images = [images]
     elif isinstance(images, list):
@@ -751,6 +812,10 @@ async def api_admin_create_product(
             inventory_quantity=inventory_quantity,
             images=saved_images,
         )
+        if vendor_id is not None:
+            product.vendor_id = vendor_id
+            db.commit()
+            db.refresh(product)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     return services.serialize_product(product)
@@ -827,6 +892,173 @@ def api_admin_payments(db: Session = Depends(get_db), current_user=Depends(auth.
     ]
 
 
+@app.get("/api/admin/vendors")
+def api_admin_list_vendors(db: Session = Depends(get_db), current_user=Depends(auth.require_admin_user)) -> List[Dict[str, object]]:
+    vendors = db.query(Vendor).order_by(Vendor.name).all()
+    return [services.serialize_vendor(vendor) for vendor in vendors]
+
+
+@app.post("/api/admin/vendors")
+def api_admin_create_vendor(
+    payload: VendorPayload,
+    db: Session = Depends(get_db),
+    current_user=Depends(auth.require_admin_user),
+) -> Dict[str, object]:
+    try:
+        vendor = services.create_vendor(
+            db=db,
+            name=payload.name,
+            code=payload.code,
+            contact_name=payload.contact_name,
+            contact_email=payload.contact_email,
+            contact_phone=payload.contact_phone,
+            status=payload.status or "active",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    return services.serialize_vendor(vendor)
+
+
+@app.put("/api/admin/vendors/{vendor_id}")
+def api_admin_update_vendor(
+    vendor_id: int,
+    payload: VendorPayload,
+    db: Session = Depends(get_db),
+    current_user=Depends(auth.require_admin_user),
+) -> Dict[str, object]:
+    vendor = db.query(Vendor).filter(Vendor.id == vendor_id).one_or_none()
+    if not vendor:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vendor not found")
+    vendor = services.update_vendor(
+        db=db,
+        vendor=vendor,
+        name=payload.name,
+        code=payload.code,
+        contact_name=payload.contact_name,
+        contact_email=payload.contact_email,
+        contact_phone=payload.contact_phone,
+        status=payload.status,
+    )
+    return services.serialize_vendor(vendor)
+
+
+@app.delete("/api/admin/vendors/{vendor_id}")
+def api_admin_delete_vendor(
+    vendor_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(auth.require_admin_user),
+) -> JSONResponse:
+    vendor = db.query(Vendor).filter(Vendor.id == vendor_id).one_or_none()
+    if not vendor:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vendor not found")
+    db.delete(vendor)
+    db.commit()
+    return JSONResponse(status_code=status.HTTP_204_NO_CONTENT, content={})
+
+
+@app.get("/api/admin/purchase-orders")
+def api_admin_list_purchase_orders(db: Session = Depends(get_db), current_user=Depends(auth.require_admin_user)) -> List[Dict[str, object]]:
+    purchase_orders = db.query(PurchaseOrder).order_by(PurchaseOrder.created_at.desc()).all()
+    return [services.serialize_purchase_order(po) for po in purchase_orders]
+
+
+@app.post("/api/admin/purchase-orders")
+def api_admin_create_purchase_order(
+    payload: PurchaseOrderCreatePayload,
+    db: Session = Depends(get_db),
+    current_user=Depends(auth.require_admin_user),
+) -> Dict[str, object]:
+    try:
+        purchase_order = services.create_purchase_order(
+            db=db,
+            vendor_id=payload.vendor_id,
+            items=[item.dict() for item in payload.items],
+            expected_delivery_date=payload.expected_delivery_date,
+            currency=payload.currency or "USD",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    return services.serialize_purchase_order(purchase_order)
+
+
+@app.put("/api/admin/purchase-orders/{purchase_order_id}")
+def api_admin_update_purchase_order(
+    purchase_order_id: int,
+    payload: PurchaseOrderUpdatePayload,
+    db: Session = Depends(get_db),
+    current_user=Depends(auth.require_admin_user),
+) -> Dict[str, object]:
+    purchase_order = db.query(PurchaseOrder).filter(PurchaseOrder.id == purchase_order_id).one_or_none()
+    if not purchase_order:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Purchase order not found")
+    purchase_order = services.update_purchase_order(
+        db=db,
+        purchase_order=purchase_order,
+        status=payload.status,
+        expected_delivery_date=payload.expected_delivery_date,
+    )
+    return services.serialize_purchase_order(purchase_order)
+
+
+@app.post("/api/admin/purchase-orders/{purchase_order_id}/receive")
+def api_admin_receive_purchase_order(
+    purchase_order_id: int,
+    payload: PurchaseOrderReceivePayload,
+    db: Session = Depends(get_db),
+    current_user=Depends(auth.require_admin_user),
+) -> Dict[str, object]:
+    purchase_order = db.query(PurchaseOrder).filter(PurchaseOrder.id == purchase_order_id).one_or_none()
+    if not purchase_order:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Purchase order not found")
+    try:
+        purchase_order = services.receive_purchase_order(
+            db=db,
+            purchase_order=purchase_order,
+            received_by=payload.received_by,
+            notes=payload.notes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    return services.serialize_purchase_order(purchase_order)
+
+
+@app.get("/api/admin/inventory-receipts")
+def api_admin_list_inventory_receipts(db: Session = Depends(get_db), current_user=Depends(auth.require_admin_user)) -> List[Dict[str, object]]:
+    receipts = db.query(InventoryReceipt).order_by(InventoryReceipt.created_at.desc()).all()
+    return [services.serialize_inventory_receipt(receipt) for receipt in receipts]
+
+
+@app.post("/api/admin/inventory-receipts")
+def api_admin_create_inventory_receipt(
+    payload: InventoryReceiptCreatePayload,
+    db: Session = Depends(get_db),
+    current_user=Depends(auth.require_admin_user),
+) -> Dict[str, object]:
+    try:
+        receipt = services.create_inventory_receipt(
+            db=db,
+            purchase_order_id=payload.purchase_order_id,
+            items=[item.dict() for item in payload.items],
+            received_by=payload.received_by,
+            notes=payload.notes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    return services.serialize_inventory_receipt(receipt)
+
+
+@app.get("/api/admin/inventory-receipts/{receipt_id}")
+def api_admin_get_inventory_receipt(
+    receipt_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(auth.require_admin_user),
+) -> Dict[str, object]:
+    receipt = db.query(InventoryReceipt).filter(InventoryReceipt.id == receipt_id).one_or_none()
+    if not receipt:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inventory receipt not found")
+    return services.serialize_inventory_receipt(receipt)
+
+
 @app.put("/api/admin/orders/{order_id}")
 def api_admin_update_order(
     order_id: int,
@@ -858,6 +1090,7 @@ async def api_admin_update_product(
     lock_duration_days: Optional[int] = Form(None),
     delivery_options: Optional[str] = Form(None),
     inventory_quantity: Optional[int] = Form(None),
+    vendor_id: Optional[int] = Form(None),
     images: Optional[Union[UploadFile, List[UploadFile]]] = File(None),
     db: Session = Depends(get_db),
     current_user=Depends(auth.require_admin_user),
@@ -867,6 +1100,11 @@ async def api_admin_update_product(
     product = db.query(Product).filter(Product.id == product_id).one_or_none()
     if not product:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+    if vendor_id is not None:
+        vendor = db.query(Vendor).filter(Vendor.id == vendor_id).one_or_none()
+        if vendor_id != 0 and not vendor:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vendor not found")
+        product.vendor_id = vendor_id if vendor_id != 0 else None
     try:
         services.update_product(
             db=db,

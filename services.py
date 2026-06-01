@@ -25,10 +25,13 @@ from models import (
     Payment,
     Product,
     ProductImage,
+    PurchaseOrder,
+    PurchaseOrderItem,
     ReserveItem,
     ReservePosition,
     ReserveVault,
     UserProfile,
+    Vendor,
 )
 from models_stripe import PaymentTransaction
 
@@ -149,6 +152,266 @@ def serialize_product(product: Product) -> Dict[str, Any]:
         "is_active": product.is_active,
         "created_at": to_serializable(product.created_at),
         "updated_at": to_serializable(product.updated_at),
+    }
+
+
+def serialize_vendor(vendor: Vendor) -> Dict[str, Any]:
+    return {
+        "id": vendor.id,
+        "name": vendor.name,
+        "code": vendor.code,
+        "contact_name": vendor.contact_name,
+        "contact_email": vendor.contact_email,
+        "contact_phone": vendor.contact_phone,
+        "status": vendor.status,
+        "created_at": to_serializable(vendor.created_at),
+        "updated_at": to_serializable(vendor.updated_at),
+    }
+
+
+def serialize_purchase_order(order: PurchaseOrder) -> Dict[str, Any]:
+    return {
+        **model_to_dict(order),
+        "vendor": serialize_vendor(order.vendor) if order.vendor else None,
+        "items": [
+            {
+                **model_to_dict(item),
+                "product": serialize_product(item.product) if item.product else None,
+            }
+            for item in order.items
+        ],
+    }
+
+
+def create_vendor(
+    db: Session,
+    name: str,
+    code: Optional[str] = None,
+    contact_name: Optional[str] = None,
+    contact_email: Optional[str] = None,
+    contact_phone: Optional[str] = None,
+    status: str = "active",
+) -> Vendor:
+    vendor = Vendor(
+        name=name,
+        code=code,
+        contact_name=contact_name,
+        contact_email=contact_email,
+        contact_phone=contact_phone,
+        status=status,
+        metadata_json={"source": "admin"},
+    )
+    db.add(vendor)
+    db.commit()
+    db.refresh(vendor)
+    return vendor
+
+
+def update_vendor(
+    db: Session,
+    vendor: Vendor,
+    name: Optional[str] = None,
+    code: Optional[str] = None,
+    contact_name: Optional[str] = None,
+    contact_email: Optional[str] = None,
+    contact_phone: Optional[str] = None,
+    status: Optional[str] = None,
+) -> Vendor:
+    if name is not None:
+        vendor.name = name
+    if code is not None:
+        vendor.code = code
+    if contact_name is not None:
+        vendor.contact_name = contact_name
+    if contact_email is not None:
+        vendor.contact_email = contact_email
+    if contact_phone is not None:
+        vendor.contact_phone = contact_phone
+    if status is not None:
+        vendor.status = status
+    db.commit()
+    db.refresh(vendor)
+    return vendor
+
+
+def create_purchase_order(
+    db: Session,
+    vendor_id: int,
+    items: List[Dict[str, Any]],
+    expected_delivery_date: Optional[datetime] = None,
+    currency: str = "USD",
+) -> PurchaseOrder:
+    vendor = db.query(Vendor).filter(Vendor.id == vendor_id).one_or_none()
+    if not vendor:
+        raise ValueError("Vendor not found")
+
+    order_number = f"PO-{int(datetime.utcnow().timestamp())}"
+    purchase_order = PurchaseOrder(
+        order_number=order_number,
+        vendor=vendor,
+        status="pending",
+        currency=currency,
+        expected_delivery_date=expected_delivery_date,
+    )
+    db.add(purchase_order)
+    db.flush()
+
+    total_amount = Decimal("0")
+    for item_payload in items:
+        product = db.query(Product).filter(Product.id == int(item_payload["product_id"])).one_or_none()
+        if not product:
+            raise ValueError("Product not found for purchase order item")
+        quantity = max(int(item_payload.get("quantity", 0)), 0)
+        unit_cost = Decimal(str(item_payload.get("unit_cost", 0)))
+        total_cost = unit_cost * quantity
+        purchase_item = PurchaseOrderItem(
+            purchase_order=purchase_order,
+            product=product,
+            quantity=quantity,
+            unit_cost=unit_cost,
+            total_cost=total_cost,
+        )
+        db.add(purchase_item)
+        total_amount += total_cost
+
+        inventory = product.inventory
+        if inventory is None:
+            inventory = Inventory(product=product, quantity=0, reserved_quantity=0, incoming_quantity=0)
+            db.add(inventory)
+        inventory.incoming_quantity = (inventory.incoming_quantity or 0) + quantity
+
+    purchase_order.total_amount = total_amount
+    db.commit()
+    db.refresh(purchase_order)
+    return purchase_order
+
+
+def update_purchase_order(
+    db: Session,
+    purchase_order: PurchaseOrder,
+    status: Optional[str] = None,
+    expected_delivery_date: Optional[datetime] = None,
+) -> PurchaseOrder:
+    if status is not None and status != purchase_order.status:
+        if status == "cancelled" and purchase_order.status not in {"received", "cancelled"}:
+            for item in purchase_order.items:
+                if item.product and item.product.inventory:
+                    item.product.inventory.incoming_quantity = max((item.product.inventory.incoming_quantity or 0) - item.quantity, 0)
+        purchase_order.status = status
+    if expected_delivery_date is not None:
+        purchase_order.expected_delivery_date = expected_delivery_date
+    db.commit()
+    db.refresh(purchase_order)
+    return purchase_order
+
+
+def receive_purchase_order(db: Session, purchase_order: PurchaseOrder, received_by: Optional[str] = None, notes: Optional[str] = None) -> PurchaseOrder:
+    if purchase_order.status == "received":
+        return purchase_order
+
+    for item in purchase_order.items:
+        if item.product is None:
+            continue
+        inventory = item.product.inventory
+        if inventory is None:
+            inventory = Inventory(product=item.product, quantity=0, reserved_quantity=0, incoming_quantity=0)
+            db.add(inventory)
+        inventory.quantity = (inventory.quantity or 0) + item.quantity
+        inventory.incoming_quantity = max((inventory.incoming_quantity or 0) - item.quantity, 0)
+
+    purchase_order.status = "received"
+    purchase_order.received_at = datetime.utcnow()
+    if notes is not None:
+        purchase_order.notes = notes
+    db.commit()
+    db.refresh(purchase_order)
+    return purchase_order
+
+
+def create_inventory_receipt(
+    db: Session,
+    purchase_order_id: int,
+    items: List[Dict[str, Any]],
+    received_by: Optional[str] = None,
+    notes: Optional[str] = None,
+) -> "InventoryReceipt":
+    """Create an inventory receipt for a purchase order with item-level tracking."""
+    from backend.models import InventoryReceipt, InventoryReceiptItem
+    
+    purchase_order = db.query(PurchaseOrder).filter(PurchaseOrder.id == purchase_order_id).one_or_none()
+    if not purchase_order:
+        raise ValueError("Purchase order not found")
+    
+    receipt_number = f"RCP-{int(datetime.utcnow().timestamp())}"
+    receipt = InventoryReceipt(
+        purchase_order=purchase_order,
+        receipt_number=receipt_number,
+        receipt_date=datetime.utcnow(),
+        received_by=received_by,
+        notes=notes,
+        status="complete",
+        metadata_json={"source": "admin"},
+    )
+    db.add(receipt)
+    db.flush()
+    
+    total_quantity = 0
+    for item_data in items:
+        po_item_id = item_data.get("purchase_order_item_id")
+        quantity_received = int(item_data.get("quantity_received", 0))
+        quantity_rejected = int(item_data.get("quantity_rejected", 0))
+        damage_notes = item_data.get("damage_notes")
+        
+        po_item = db.query(PurchaseOrderItem).filter(PurchaseOrderItem.id == po_item_id).one_or_none()
+        if not po_item:
+            raise ValueError(f"Purchase order item {po_item_id} not found")
+        
+        receipt_item = InventoryReceiptItem(
+            receipt=receipt,
+            purchase_order_item=po_item,
+            product=po_item.product,
+            quantity_ordered=po_item.quantity,
+            quantity_received=quantity_received,
+            quantity_rejected=quantity_rejected,
+            damage_notes=damage_notes,
+        )
+        db.add(receipt_item)
+        total_quantity += quantity_received
+        
+        # Update inventory for received quantity only
+        if po_item.product:
+            inventory = po_item.product.inventory
+            if inventory is None:
+                inventory = Inventory(product=po_item.product, quantity=0, reserved_quantity=0, incoming_quantity=0)
+                db.add(inventory)
+            inventory.quantity = (inventory.quantity or 0) + quantity_received
+            inventory.incoming_quantity = max((inventory.incoming_quantity or 0) - quantity_received, 0)
+    
+    db.commit()
+    db.refresh(receipt)
+    return receipt
+
+
+def serialize_inventory_receipt(receipt: "InventoryReceipt") -> Dict[str, Any]:
+    """Serialize inventory receipt with items."""
+    return {
+        "id": receipt.id,
+        "receipt_number": receipt.receipt_number,
+        "purchase_order_id": receipt.purchase_order_id,
+        "purchase_order": serialize_purchase_order(receipt.purchase_order) if receipt.purchase_order else None,
+        "receipt_date": to_serializable(receipt.receipt_date),
+        "received_by": receipt.received_by,
+        "notes": receipt.notes,
+        "status": receipt.status,
+        "items": [
+            {
+                **model_to_dict(item),
+                "product": serialize_product(item.product) if item.product else None,
+            }
+            for item in receipt.items
+        ],
+        "created_at": to_serializable(receipt.created_at),
+        "updated_at": to_serializable(receipt.updated_at),
     }
 
 

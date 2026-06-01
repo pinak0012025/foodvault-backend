@@ -85,6 +85,7 @@ class Product(Base):
     reserve_days = Column(Integer, nullable=False, default=30)
     rating = Column(Numeric(3, 1), nullable=True, default=4.7)
     delivery_options = Column(String(255), nullable=True)
+    vendor_id = Column(Integer, ForeignKey("vendors.id", ondelete="SET NULL"), nullable=True)
     metadata_json = Column("metadata", JSON, default={})
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=now())
@@ -98,6 +99,7 @@ class Product(Base):
     reserve_positions = relationship("ReservePosition", back_populates="product")
     product_prices = relationship("ProductPrice", back_populates="product", cascade="all, delete-orphan")
     vault_market_prices = relationship("VaultMarketPrice", back_populates="product", cascade="all, delete-orphan")
+    vendor = relationship("Vendor", backref="products")
 
 
 class ProductImage(Base):
@@ -123,6 +125,95 @@ class Inventory(Base):
     updated_at = Column(DateTime(timezone=True), server_default=now(), onupdate=now())
 
     product = relationship("Product", back_populates="inventory")
+
+
+class Vendor(Base):
+    __tablename__ = "vendors"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), nullable=False)
+    code = Column(String(64), unique=True, nullable=True)
+    contact_name = Column(String(255), nullable=True)
+    contact_email = Column(String(255), nullable=True)
+    contact_phone = Column(String(64), nullable=True)
+    status = Column(String(32), nullable=False, default="active")
+    metadata_json = Column("metadata", JSON, default={})
+    created_at = Column(DateTime(timezone=True), server_default=now())
+    updated_at = Column(DateTime(timezone=True), server_default=now(), onupdate=now())
+
+    purchase_orders = relationship("PurchaseOrder", back_populates="vendor", cascade="all, delete-orphan")
+
+
+class PurchaseOrder(Base):
+    __tablename__ = "purchase_orders"
+
+    id = Column(Integer, primary_key=True, index=True)
+    order_number = Column(String(64), unique=True, index=True, nullable=False)
+    vendor_id = Column(Integer, ForeignKey("vendors.id", ondelete="SET NULL"), nullable=True)
+    status = Column(String(32), nullable=False, default="pending")
+    total_amount = Column(Numeric(12, 2), nullable=False, default=0)
+    currency = Column(String(16), nullable=False, default="USD")
+    expected_delivery_date = Column(DateTime(timezone=True), nullable=True)
+    received_at = Column(DateTime(timezone=True), nullable=True)
+    notes = Column(Text, nullable=True)
+    metadata_json = Column("metadata", JSON, default={})
+    created_at = Column(DateTime(timezone=True), server_default=now())
+    updated_at = Column(DateTime(timezone=True), server_default=now(), onupdate=now())
+
+    vendor = relationship("Vendor", back_populates="purchase_orders")
+    items = relationship("PurchaseOrderItem", back_populates="purchase_order", cascade="all, delete-orphan")
+    receipts = relationship("InventoryReceipt", back_populates="purchase_order", cascade="all, delete-orphan")
+
+
+class PurchaseOrderItem(Base):
+    __tablename__ = "purchase_order_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    purchase_order_id = Column(Integer, ForeignKey("purchase_orders.id", ondelete="CASCADE"), nullable=False)
+    product_id = Column(Integer, ForeignKey("products.id", ondelete="SET NULL"), nullable=True)
+    quantity = Column(Integer, nullable=False, default=0)
+    unit_cost = Column(Numeric(12, 2), nullable=False, default=0)
+    total_cost = Column(Numeric(12, 2), nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=now())
+
+    purchase_order = relationship("PurchaseOrder", back_populates="items")
+    product = relationship("Product")
+
+
+class InventoryReceipt(Base):
+    __tablename__ = "inventory_receipts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    purchase_order_id = Column(Integer, ForeignKey("purchase_orders.id", ondelete="CASCADE"), nullable=False)
+    receipt_number = Column(String(64), unique=True, index=True, nullable=False)
+    receipt_date = Column(DateTime(timezone=True), server_default=now())
+    received_by = Column(String(255), nullable=True)
+    notes = Column(Text, nullable=True)
+    status = Column(String(32), nullable=False, default="complete")
+    metadata_json = Column("metadata", JSON, default={})
+    created_at = Column(DateTime(timezone=True), server_default=now())
+    updated_at = Column(DateTime(timezone=True), server_default=now(), onupdate=now())
+
+    purchase_order = relationship("PurchaseOrder", back_populates="receipts")
+    items = relationship("InventoryReceiptItem", back_populates="receipt", cascade="all, delete-orphan")
+
+
+class InventoryReceiptItem(Base):
+    __tablename__ = "inventory_receipt_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    receipt_id = Column(Integer, ForeignKey("inventory_receipts.id", ondelete="CASCADE"), nullable=False)
+    purchase_order_item_id = Column(Integer, ForeignKey("purchase_order_items.id", ondelete="CASCADE"), nullable=False)
+    product_id = Column(Integer, ForeignKey("products.id", ondelete="SET NULL"), nullable=True)
+    quantity_ordered = Column(Integer, nullable=False, default=0)
+    quantity_received = Column(Integer, nullable=False, default=0)
+    quantity_rejected = Column(Integer, nullable=False, default=0)
+    damage_notes = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=now())
+
+    receipt = relationship("InventoryReceipt", back_populates="items")
+    purchase_order_item = relationship("PurchaseOrderItem")
+    product = relationship("Product")
 
 
 class Cart(Base):
