@@ -2,6 +2,7 @@ import os
 import re
 import sys
 import time
+import traceback
 from datetime import datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -23,7 +24,7 @@ if str(BASE_DIR.parent) not in sys.path:
 import auth, services, database, models
 import httpx
 from database import get_db, init_db
-from models import AdminSession, AdminUser, CartItem, Order, Payment, Product, ReserveVault, ReserveItem, DeliverySchedule, Inventory, UserProfile
+from models import AdminSession, AdminUser, CartItem, Order, Payment, Product, ReserveVault, ReserveItem, DeliverySchedule, Inventory, UserProfile, Vendor, PurchaseOrder, PurchaseOrderItem, InventoryReceipt, InventoryReceiptItem
 from phase2_routes import router as phase2_router
 from phase2_services import create_referral_commission_for_order
 from routes.payment_routes import router as payment_router
@@ -60,7 +61,7 @@ def is_allowed_origin(origin: Optional[str]) -> bool:
 
 
 app_env = os.getenv("APP_ENV", os.getenv("NODE_ENV", "development")).lower()
-print(f"[api] CORS allowed origins: {allowed_origins} (env={app_env}) - main.py:63", flush=True)
+print(f"[api] CORS allowed origins: {allowed_origins} (env={app_env}) - main.py:64", flush=True)
 
 def use_secure_cookies() -> bool:
     insecure_override = os.getenv("DEV_INSECURE_COOKIES", "").lower()
@@ -156,13 +157,13 @@ async def log_api_requests(request: Request, call_next):
         response = await call_next(request)
     except Exception as exc:
         duration_ms = (time.perf_counter() - started) * 1000
-        print(f"[api] ERROR {request.method} {request.url.path} after {duration_ms:.1f}ms: {exc} - main.py:159", flush=True)
+        print(f"[api] ERROR {request.method} {request.url.path} after {duration_ms:.1f}ms: {exc} - main.py:160", flush=True)
         raise
 
     if request.url.path.startswith("/api/"):
         duration_ms = (time.perf_counter() - started) * 1000
         cors_origin = response.headers.get("Access-Control-Allow-Origin", "none")
-        print(f"[api] {request.method} {request.url.path} > {response.status_code} (CORS: {cors_origin}) ({duration_ms:.1f}ms) - main.py:165", flush=True)
+        print(f"[api] {request.method} {request.url.path} > {response.status_code} (CORS: {cors_origin}) ({duration_ms:.1f}ms) - main.py:166", flush=True)
 
     return response
 
@@ -894,6 +895,7 @@ def api_admin_create_vendor(
     payload: VendorPayload,
     db: Session = Depends(get_db),
 ) -> Dict[str, object]:
+    print(f"[api] api_admin_create_vendor payload={payload.dict()}" , flush=True)
     try:
         vendor = services.create_vendor(
             db=db,
@@ -905,7 +907,13 @@ def api_admin_create_vendor(
             status=payload.status or "active",
         )
     except ValueError as exc:
+        print(f"[api] api_admin_create_vendor ValueError: {exc}", flush=True)
+        traceback.print_exc()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except Exception as exc:
+        print(f"[api] api_admin_create_vendor Exception: {exc}", flush=True)
+        traceback.print_exc()
+        raise
     return services.serialize_vendor(vendor)
 
 
@@ -915,19 +923,27 @@ def api_admin_update_vendor(
     payload: VendorPayload,
     db: Session = Depends(get_db),
 ) -> Dict[str, object]:
-    vendor = db.query(Vendor).filter(Vendor.id == vendor_id).one_or_none()
-    if not vendor:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vendor not found")
-    vendor = services.update_vendor(
-        db=db,
-        vendor=vendor,
-        name=payload.name,
-        code=payload.code,
-        contact_name=payload.contact_name,
-        contact_email=payload.contact_email,
-        contact_phone=payload.contact_phone,
-        status=payload.status,
-    )
+    print(f"[api] api_admin_update_vendor vendor_id={vendor_id} payload={payload.dict()}", flush=True)
+    try:
+        vendor = db.query(Vendor).filter(Vendor.id == vendor_id).one_or_none()
+        if not vendor:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vendor not found")
+        vendor = services.update_vendor(
+            db=db,
+            vendor=vendor,
+            name=payload.name,
+            code=payload.code,
+            contact_name=payload.contact_name,
+            contact_email=payload.contact_email,
+            contact_phone=payload.contact_phone,
+            status=payload.status,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        print(f"[api] api_admin_update_vendor Exception: {exc}", flush=True)
+        traceback.print_exc()
+        raise
     return services.serialize_vendor(vendor)
 
 
@@ -936,18 +952,32 @@ def api_admin_delete_vendor(
     vendor_id: int,
     db: Session = Depends(get_db),
 ) -> JSONResponse:
-    vendor = db.query(Vendor).filter(Vendor.id == vendor_id).one_or_none()
-    if not vendor:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vendor not found")
-    db.delete(vendor)
-    db.commit()
+    print(f"[api] api_admin_delete_vendor vendor_id={vendor_id}", flush=True)
+    try:
+        vendor = db.query(Vendor).filter(Vendor.id == vendor_id).one_or_none()
+        if not vendor:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vendor not found")
+        db.delete(vendor)
+        db.commit()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        print(f"[api] api_admin_delete_vendor Exception: {exc}", flush=True)
+        traceback.print_exc()
+        raise
     return JSONResponse(status_code=status.HTTP_204_NO_CONTENT, content={})
 
 
 @app.get("/api/admin/purchase-orders")
 def api_admin_list_purchase_orders(db: Session = Depends(get_db)) -> List[Dict[str, object]]:
-    purchase_orders = db.query(PurchaseOrder).order_by(PurchaseOrder.created_at.desc()).all()
-    return [services.serialize_purchase_order(po) for po in purchase_orders]
+    print("[api] api_admin_list_purchase_orders", flush=True)
+    try:
+        purchase_orders = db.query(PurchaseOrder).order_by(PurchaseOrder.created_at.desc()).all()
+        return [services.serialize_purchase_order(po) for po in purchase_orders]
+    except Exception as exc:
+        print(f"[api] api_admin_list_purchase_orders Exception: {exc}", flush=True)
+        traceback.print_exc()
+        raise
 
 
 @app.post("/api/admin/purchase-orders")
@@ -955,6 +985,7 @@ def api_admin_create_purchase_order(
     payload: PurchaseOrderCreatePayload,
     db: Session = Depends(get_db),
 ) -> Dict[str, object]:
+    print(f"[api] api_admin_create_purchase_order payload={payload.dict()}", flush=True)
     try:
         purchase_order = services.create_purchase_order(
             db=db,
@@ -964,7 +995,13 @@ def api_admin_create_purchase_order(
             currency=payload.currency or "USD",
         )
     except ValueError as exc:
+        print(f"[api] api_admin_create_purchase_order ValueError: {exc}", flush=True)
+        traceback.print_exc()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except Exception as exc:
+        print(f"[api] api_admin_create_purchase_order Exception: {exc}", flush=True)
+        traceback.print_exc()
+        raise
     return services.serialize_purchase_order(purchase_order)
 
 
@@ -974,16 +1011,24 @@ def api_admin_update_purchase_order(
     payload: PurchaseOrderUpdatePayload,
     db: Session = Depends(get_db),
 ) -> Dict[str, object]:
-    purchase_order = db.query(PurchaseOrder).filter(PurchaseOrder.id == purchase_order_id).one_or_none()
-    if not purchase_order:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Purchase order not found")
-    purchase_order = services.update_purchase_order(
-        db=db,
-        purchase_order=purchase_order,
-        status=payload.status,
-        expected_delivery_date=payload.expected_delivery_date,
-    )
-    return services.serialize_purchase_order(purchase_order)
+    print(f"[api] api_admin_update_purchase_order purchase_order_id={purchase_order_id} payload={payload.dict()}", flush=True)
+    try:
+        purchase_order = db.query(PurchaseOrder).filter(PurchaseOrder.id == purchase_order_id).one_or_none()
+        if not purchase_order:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Purchase order not found")
+        purchase_order = services.update_purchase_order(
+            db=db,
+            purchase_order=purchase_order,
+            status=payload.status,
+            expected_delivery_date=payload.expected_delivery_date,
+        )
+        return services.serialize_purchase_order(purchase_order)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        print(f"[api] api_admin_update_purchase_order Exception: {exc}", flush=True)
+        traceback.print_exc()
+        raise
 
 
 @app.post("/api/admin/purchase-orders/{purchase_order_id}/receive")
@@ -992,10 +1037,11 @@ def api_admin_receive_purchase_order(
     payload: PurchaseOrderReceivePayload,
     db: Session = Depends(get_db),
 ) -> Dict[str, object]:
-    purchase_order = db.query(PurchaseOrder).filter(PurchaseOrder.id == purchase_order_id).one_or_none()
-    if not purchase_order:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Purchase order not found")
+    print(f"[api] api_admin_receive_purchase_order purchase_order_id={purchase_order_id} payload={payload.dict()}", flush=True)
     try:
+        purchase_order = db.query(PurchaseOrder).filter(PurchaseOrder.id == purchase_order_id).one_or_none()
+        if not purchase_order:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Purchase order not found")
         purchase_order = services.receive_purchase_order(
             db=db,
             purchase_order=purchase_order,
@@ -1003,14 +1049,28 @@ def api_admin_receive_purchase_order(
             notes=payload.notes,
         )
     except ValueError as exc:
+        print(f"[api] api_admin_receive_purchase_order ValueError: {exc}", flush=True)
+        traceback.print_exc()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        print(f"[api] api_admin_receive_purchase_order Exception: {exc}", flush=True)
+        traceback.print_exc()
+        raise
     return services.serialize_purchase_order(purchase_order)
 
 
 @app.get("/api/admin/inventory-receipts")
 def api_admin_list_inventory_receipts(db: Session = Depends(get_db)) -> List[Dict[str, object]]:
-    receipts = db.query(InventoryReceipt).order_by(InventoryReceipt.created_at.desc()).all()
-    return [services.serialize_inventory_receipt(receipt) for receipt in receipts]
+    print("[api] api_admin_list_inventory_receipts", flush=True)
+    try:
+        receipts = db.query(InventoryReceipt).order_by(InventoryReceipt.created_at.desc()).all()
+        return [services.serialize_inventory_receipt(receipt) for receipt in receipts]
+    except Exception as exc:
+        print(f"[api] api_admin_list_inventory_receipts Exception: {exc}", flush=True)
+        traceback.print_exc()
+        raise
 
 
 @app.post("/api/admin/inventory-receipts")
@@ -1018,6 +1078,7 @@ def api_admin_create_inventory_receipt(
     payload: InventoryReceiptCreatePayload,
     db: Session = Depends(get_db),
 ) -> Dict[str, object]:
+    print(f"[api] api_admin_create_inventory_receipt payload={payload.dict()}", flush=True)
     try:
         receipt = services.create_inventory_receipt(
             db=db,
@@ -1027,7 +1088,13 @@ def api_admin_create_inventory_receipt(
             notes=payload.notes,
         )
     except ValueError as exc:
+        print(f"[api] api_admin_create_inventory_receipt ValueError: {exc}", flush=True)
+        traceback.print_exc()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except Exception as exc:
+        print(f"[api] api_admin_create_inventory_receipt Exception: {exc}", flush=True)
+        traceback.print_exc()
+        raise
     return services.serialize_inventory_receipt(receipt)
 
 
@@ -1036,10 +1103,18 @@ def api_admin_get_inventory_receipt(
     receipt_id: int,
     db: Session = Depends(get_db),
 ) -> Dict[str, object]:
-    receipt = db.query(InventoryReceipt).filter(InventoryReceipt.id == receipt_id).one_or_none()
-    if not receipt:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inventory receipt not found")
-    return services.serialize_inventory_receipt(receipt)
+    print(f"[api] api_admin_get_inventory_receipt receipt_id={receipt_id}", flush=True)
+    try:
+        receipt = db.query(InventoryReceipt).filter(InventoryReceipt.id == receipt_id).one_or_none()
+        if not receipt:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inventory receipt not found")
+        return services.serialize_inventory_receipt(receipt)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        print(f"[api] api_admin_get_inventory_receipt Exception: {exc}", flush=True)
+        traceback.print_exc()
+        raise
 
 
 @app.put("/api/admin/orders/{order_id}")
