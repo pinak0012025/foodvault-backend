@@ -22,21 +22,12 @@ if str(BASE_DIR.parent) not in sys.path:
 
 import auth, services, database, models
 import httpx
-<<<<<<< HEAD
 from database import get_db, init_db
 from models import AdminSession, AdminUser, CartItem, Order, Payment, Product, ReserveVault, ReserveItem, DeliverySchedule, Inventory, UserProfile
 from phase2_routes import router as phase2_router
 from phase2_services import create_referral_commission_for_order
 from routes.payment_routes import router as payment_router
 from webhooks.stripe_webhooks import router as stripe_webhook_router
-=======
-from backend.database import get_db, init_db
-from backend.models import AdminSession, AdminUser, CartItem, Order, Payment, Product, ReserveVault, ReserveItem, DeliverySchedule, Inventory, UserProfile, Vendor, PurchaseOrder, PurchaseOrderItem, InventoryReceipt, InventoryReceiptItem
-from backend.phase2_routes import router as phase2_router
-from backend.phase2_services import create_referral_commission_for_order
-from backend.routes.payment_routes import router as payment_router
-from backend.webhooks.stripe_webhooks import router as stripe_webhook_router
->>>>>>> 7f433c6 (Added vendor management, purchase orders, inventory receipts and procurement workflow)
 
 load_dotenv(BASE_DIR / ".env")
 load_dotenv(BASE_DIR.parent / ".env.local")
