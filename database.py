@@ -9,8 +9,9 @@ load_dotenv(dotenv_path=BASE_DIR / ".env")
 load_dotenv(dotenv_path=BASE_DIR.parent / ".env", override=False)
 
 DATABASE_URL = os.getenv("DATABASE_URL") or os.getenv("SUPABASE_DATABASE_URL")
+
 if not DATABASE_URL:
-    DATABASE_URL = "sqlite:///./backend.db"
+    DATABASE_URL = f"sqlite:///{BASE_DIR}/backend.db"
 
 engine = create_engine(DATABASE_URL, future=True, echo=False)
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False, autoflush=False, autocommit=False, future=True)
@@ -228,7 +229,6 @@ def init_db() -> None:
     ensure_user_profile_columns()
     ensure_reserve_item_columns()
     ensure_procurement_tables()
-    seed_default_products()
 
 
 def get_db():
