@@ -36,6 +36,7 @@ def calculate_checkout_totals(payload: dict, product_lookup: dict) -> dict:
         normalized_product_id = _normalize_product_id(raw_product_id)
         quantity = max(int(item.get("quantity", 1)), 1)
         reserve_option = str(item.get("reserve_option", "purchase")).lower()
+        action_type = str(item.get("action_type") or "LOCK").upper()
 
         product = product_lookup.get(normalized_product_id)
         if product is None:
@@ -46,23 +47,26 @@ def calculate_checkout_totals(payload: dict, product_lookup: dict) -> dict:
 
         unit_price = Decimal(str(product.get("price") or 0))
         if reserve_option == "reserve":
-            product_locked_price = product.get("locked_price")
-            product_reserve_lock_price = product.get("reserve_lock_price")
-            reserve_unit = None
-            if product_locked_price not in (None, ""):
-                reserve_unit = Decimal(str(product_locked_price))
-            elif product_reserve_lock_price not in (None, ""):
-                reserve_unit = Decimal(str(product_reserve_lock_price))
+            explicit_pay_now = item.get("pay_now")
+            if explicit_pay_now is not None:
+                reserve_line_total = Decimal(str(explicit_pay_now)).quantize(Decimal("0.01"))
             else:
-                reserve_unit = unit_price
+                reserve_unit = product.get("locked_price")
+                if reserve_unit in (None, ""):
+                    reserve_unit = product.get("reserve_lock_price")
+                if reserve_unit in (None, ""):
+                    reserve_unit = unit_price
+                reserve_line_total = (Decimal(str(reserve_unit)) * quantity).quantize(Decimal("0.01"))
 
             reserve_values.append({
                 "product_id": normalized_product_id,
                 "quantity": quantity,
-                "unit_price": reserve_unit,
+                "unit_price": unit_price,
                 "name": product.get("name"),
+                "action_type": action_type,
+                "pay_now": reserve_line_total,
             })
-            computed_reserve_upfront += reserve_unit * quantity
+            computed_reserve_upfront += reserve_line_total
         else:
             computed_purchase_total += unit_price * quantity
 
@@ -71,7 +75,7 @@ def calculate_checkout_totals(payload: dict, product_lookup: dict) -> dict:
         computed_reserve_upfront = Decimal(str(explicit_reserve_upfront)).quantize(Decimal("0.01"))
 
     membership_fee = Decimal(str(payload.get("membership_fee", 0))).quantize(Decimal("0.01"))
-    reserve_total_value = Decimal(str(payload.get("reserve_total_value", computed_reserve_upfront))).quantize(Decimal("0.01"))
+    reserve_total_value = Decimal(str(payload.get("reserve_total_value", sum((item.get("pay_now") or 0) for item in items if str(item.get("reserve_option", "purchase")).lower() == "reserve")))).quantize(Decimal("0.01"))
     remaining_balance = Decimal(str(payload.get("remaining_balance", max(reserve_total_value - computed_reserve_upfront, Decimal("0.00"))))).quantize(Decimal("0.01"))
     expected_amount = (computed_purchase_total + computed_reserve_upfront + membership_fee).quantize(Decimal("0.01"))
 

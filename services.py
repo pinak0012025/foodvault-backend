@@ -768,6 +768,10 @@ def create_reserve_vault(
         quantity = int(item_payload.get("quantity", 1))
         reserve_type = item_payload.get("reserve_type", "deposit")
         partial_delivery = bool(item_payload.get("partial_delivery", False))
+        action_type = str(item_payload.get("action_type") or "LOCK").upper()
+        delivery_date = item_payload.get("delivery_date")
+        lock_fee = Decimal(str(item_payload.get("lock_fee", 0) or 0)).quantize(Decimal("0.01"))
+        pay_now = Decimal(str(item_payload.get("pay_now", 0) or 0)).quantize(Decimal("0.01"))
         product = db.query(Product).filter(Product.id == product_id, Product.is_active.is_(True)).one_or_none()
         if not product:
             continue
@@ -785,6 +789,10 @@ def create_reserve_vault(
             deposit_paid=deposit_paid,
             partial_delivery=partial_delivery,
             lock_expires_at=lock_expires_at,
+            action_type=action_type,
+            delivery_date=delivery_date,
+            lock_fee=lock_fee,
+            pay_now=pay_now,
         )
         reserve_item = ReserveItem(
             reserve_vault=vault,
@@ -898,10 +906,20 @@ def build_reserve_lifecycle_metadata(
     deposit_paid: Decimal,
     partial_delivery: bool,
     lock_expires_at: datetime,
+    action_type: str = "LOCK",
+    delivery_date: Optional[str] = None,
+    lock_fee: Decimal = Decimal("0.00"),
+    pay_now: Decimal = Decimal("0.00"),
 ) -> dict:
     ownership_percent = int((deposit_paid / total_value) * Decimal("100")) if total_value else 0
     ownership_percent = min(100, max(0, ownership_percent))
     metadata = {
+        "action": {
+            "type": action_type,
+            "delivery_date": delivery_date,
+            "lock_fee": float(lock_fee),
+            "pay_now": float(pay_now),
+        },
         "reservation": {
             "lock_percent": 15,
             "ownership_percent": ownership_percent,

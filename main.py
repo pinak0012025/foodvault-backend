@@ -644,6 +644,10 @@ class ReserveItemPayload(BaseModel):
     quantity: int = Field(default=1, ge=1)
     reserve_type: str = Field(default="deposit")
     partial_delivery: bool = False
+    action_type: Optional[str] = "LOCK"
+    delivery_date: Optional[str] = None
+    lock_fee: Optional[Decimal] = 0
+    pay_now: Optional[Decimal] = 0
 
 
 class ReservePayload(BaseModel):
